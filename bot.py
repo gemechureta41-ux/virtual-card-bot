@@ -57,6 +57,31 @@ def update_user_balance(user_id, amount):
     conn.commit()
     conn.close()
 
+# --- LUHN ALGORITHM FOR REAL STANDARD CARD GENERATION ---
+def generate_luhn_card(prefix_list, length=16):
+    prefix = str(random.choice(prefix_list))
+    number = [int(x) for x in prefix]
+    while len(number) < length - 1:
+        number.append(random.randint(0, 9))
+    
+    sum_val = 0
+    alt = True
+    for digit in reversed(number):
+        if alt:
+            val = digit * 2
+            if val > 9:
+                val -= 9
+            sum_val += val
+        else:
+            sum_val += digit
+        alt = not alt
+    
+    check_digit = (10 - (sum_val % 10)) % 10
+    number.append(check_digit)
+    
+    card_str = "".join([str(x) for x in number])
+    return f"{card_str[0:4]} {card_str[4:8]} {card_str[8:12]} {card_str[12:16]}"
+
 # --- KEYBOARDS (English) ---
 start_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
 start_keyboard.row(KeyboardButton("➡️ Get Started"), KeyboardButton("❓ Help"))
@@ -186,7 +211,7 @@ async def handle_name_input(message: types.Message):
 async def handle_card_brand_selection(message: types.Message):
     user_id = message.from_user.id
     balance = get_user_balance(user_id)
-    required_usd = 5.0  # $5 card (1,100 ETB)
+    required_usd = 5.0  # $5 card default plan
     
     if user_id != ADMIN_ID and balance < required_usd:
         warning_text = (
@@ -197,14 +222,22 @@ async def handle_card_brand_selection(message: types.Message):
     else:
         if user_id != ADMIN_ID:
             update_user_balance(user_id, -required_usd)
-            card_info_text = f"💵 **Card Balance:** `${required_usd:.2f} USD` (`{required_usd * EXCHANGE_RATE:.2f} ETB`)"
+            card_status_text = f"💵 **Balance:** `${required_usd:.2f} USD`"
         else:
-            card_info_text = f"👑 **Admin Free Card** | 💵 **Balance:** `${required_usd:.2f} USD` (Free)"
+            card_status_text = f"👑 **Admin Free Card**"
         
-        prefix = "4" if message.text == "Visa" else "5"
-        card_num = f"{prefix}{random.randint(100,999)} {random.randint(1000,9999)} {random.randint(1000,9999)} {random.randint(1000,9999)}"
-        cvv_num = f"{random.randint(100,999)}"
-        expiry_date = "12/28"
+        # Generate valid standard card number using Luhn algorithm
+        if message.text == "Visa":
+            card_num = generate_luhn_card([4000, 4111, 4222, 4532, 4929])
+            brand_emoji = "🔹 **VISA PLATINUM**"
+            card_theme = "🟦 ⬛ 🟦 ⬛ 🟦" # Blue & Dark Theme
+        else:
+            card_num = generate_luhn_card([5100, 5200, 5300, 5400, 5500])
+            brand_emoji = "🔸 **MASTERCARD WORLD**"
+            card_theme = "🟥 ⬛ 🟥 ⬛ 🟥" # Red & Dark Theme
+            
+        cvv_num = f"{random.randint(100, 999)}"
+        expiry_date = f"{random.randint(1, 12):02d}/{random.randint(27, 31)}"
         
         conn = sqlite3.connect('virtual_card_bot.db')
         cursor = conn.cursor()
@@ -213,15 +246,22 @@ async def handle_card_brand_selection(message: types.Message):
         conn.commit()
         conn.close()
         
-        card_success = (
-            f"🎉 **Virtual {message.text} Card Generated Successfully!**\n\n"
-            f"💳 **Card Number:** `{card_num}`\n"
-            f"📅 **Expiry Date:** `{expiry_date}`\n"
-            f"🔒 **CVV:** `{cvv_num}`\n"
-            f"{card_info_text}\n\n"
-            f"🌍 _Ready for international online payments!_"
+        # Beautiful Card Art UI Formatting
+        card_design = (
+            f"🎉 **Virtual {message.text} Card Generated Successfully!** 🎉\n\n"
+            f"{card_theme}\n"
+            f"┌──────────────────────────────┐\n"
+            f"│  {brand_emoji}                │\n"
+            f"│                              │\n"
+            f"│  💳 `{card_num}`    │\n"
+            f"│                              │\n"
+            f"│  📅 EXP: `{expiry_date}`  🔒 CVV: `{cvv_num}`  │\n"
+            f"│  {card_status_text}          │\n"
+            f"└──────────────────────────────┘\n"
+            f"{card_theme}\n\n"
+            f"🌍 _Your card is ready for online verification & usage!_"
         )
-        await message.answer(card_success, parse_mode="Markdown", reply_markup=main_menu_keyboard)
+        await message.answer(card_design, parse_mode="Markdown", reply_markup=main_menu_keyboard)
 
 @dp.message_handler(lambda message: message.text == "📋 My Virtual Cards 💳")
 async def show_user_cards(message: types.Message):
@@ -237,7 +277,13 @@ async def show_user_cards(message: types.Message):
     else:
         response = "📋 **Your Active Virtual Cards:**\n\n"
         for idx, card in enumerate(cards, 1):
-            response += f"*{idx}. {card[3]} Card*\n💳 `{card[0]}`\n📅 Exp: `{card[1]}` | 🔒 CVV: `{card[2]}` | Bal: `${card[4]}`\n\n"
+            brand_icon = "🔹" if card[3] == "Visa" else "🔸"
+            response += (
+                f"{brand_icon} *Card #{idx} ({card[3]})*\n"
+                f"💳 `Num: {card[0]}`\n"
+                f"📅 Exp: `{card[1]}` | 🔒 CVV: `{card[2]}` | Bal: `${card[4]}`\n"
+                f"----------------------------------------\n"
+            )
         await message.answer(response, parse_mode="Markdown", reply_markup=main_menu_keyboard)
 
 @dp.message_handler(lambda message: message.text in ["🔙 Back to Menu", "🚪 Exit"])
