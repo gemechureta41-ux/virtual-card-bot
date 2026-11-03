@@ -4,8 +4,8 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
-API_TOKEN = '9273864217:AAHGHGVNb0nHVQTIuDhh7tuDKeMxJhRRL4w'  # Token kee
-ADMIN_ID = 5558713786  # Admin ID (Gemechu Reta)
+API_TOKEN = '9273864217:AAHGHGVNb0nHVQTIuDhh7tuDKeMxJhRRL4w'  # Bot Token kee
+ADMIN_ID = 5558713786  # Admin ID kee (Gemechu Reta)
 
 EXCHANGE_RATE = 220.0  # 1 USDT = 220 ETB Rate
 
@@ -125,7 +125,7 @@ async def handle_add_funds(message: types.Message):
 async def handle_deposit_info(message: types.Message):
     deposit_text = (
         "💎 **Deposit Instructions (1 USDT = 220 ETB)**\n\n"
-        "📌 **USDT TRC20 Address:**\n`TXYZ1234567890abcdefTRC20WalletAddressHere`\n\n"
+        "📌 **USDT TRC20 Address:**\n`TDEvyq3VokpJWjPrvKRVz4mPXvVgWBP5GW`\n\n"
         "🏦 **Telebirr Account:** Gemechu Reta (+251917091612)\n\n"
         f"👤 **Your User ID (Memo/Ref):** `{message.from_user.id}`\n\n"
         "📋 _Transfer funds and send your transaction hash or receipt screenshot here for instant admin approval._"
@@ -148,7 +148,7 @@ async def handle_name_input(message: types.Message):
 async def handle_card_brand_selection(message: types.Message):
     user_id = message.from_user.id
     balance = get_user_balance(user_id)
-    required_usd = 5.0  # Fakkeenyaaf kaardiin jalqabaa $5 (1,100 ETB)
+    required_usd = 5.0  # $5 card (1,100 ETB)
     
     if balance < required_usd:
         warning_text = (
