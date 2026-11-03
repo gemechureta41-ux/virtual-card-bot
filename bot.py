@@ -33,6 +33,7 @@ def init_db():
             expiry TEXT,
             cvv TEXT,
             brand TEXT,
+            holder_name TEXT,
             amount_usd REAL
         )
     ''')
@@ -108,8 +109,11 @@ card_plans_keyboard.add(
 )
 
 brand_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-brand_keyboard.row(KeyboardButton("Visa"), KeyboardButton("MasterCard"))
+brand_keyboard.row(KeyboardButton("Visa Gold"), KeyboardButton("MasterCard"))
 brand_keyboard.row(KeyboardButton("🔙 Back to Menu"))
+
+# Temporary memory to store card holder name during creation flow
+user_temp_data = {}
 
 # --- HANDLERS ---
 @dp.message_handler(commands=['start'])
@@ -154,7 +158,7 @@ async def admin_view_all_cards(message: types.Message):
     conn = sqlite3.connect('virtual_card_bot.db')
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT cards.id, cards.user_id, users.username, cards.card_number, cards.expiry, cards.cvv, cards.brand, cards.amount_usd 
+        SELECT cards.id, cards.user_id, users.username, cards.card_number, cards.expiry, cards.cvv, cards.brand, cards.holder_name, cards.amount_usd 
         FROM cards 
         LEFT JOIN users ON cards.user_id = users.user_id
     ''')
@@ -169,7 +173,7 @@ async def admin_view_all_cards(message: types.Message):
             response += (
                 f"🆔 Card ID:\n"
                 f"👤 **User ID:** `{card[1]}` (@{card[2] or 'No Username'})\n"
-                f"💳 Brand: | **Balance:** `${card[7]}`\n"
+                f"💳 Brand: | **Holder:** `{card[7]}` | **Bal:** `${card[8]}`\n"
                 f"💳 **Number:** `{card[3]}`\n"
                 f"📅 **Exp:** `{card[4]}` | 🔒 **CVV:** `{card[5]}`\n"
                 f"----------------------------------------\n"
@@ -201,17 +205,31 @@ async def handle_create_card(message: types.Message):
 
 @dp.message_handler(lambda message: "Card (" in message.text)
 async def handle_card_plan_selection(message: types.Message):
-    await message.answer("💡 **Almost there!**\nPlease provide the **Card Holder Name** (e.g., John Doe):", parse_mode="Markdown")
+    # Store selected plan amount fkn $5
+    try:
+        amount_str = message.text.split('$')[1].split(' ')[0]
+        user_temp_data[message.from_user.id] = {"amount": float(amount_str)}
+    except:
+        user_temp_data[message.from_user.id] = {"amount": 5.0}
+        
+    await message.answer("💡 **Almost there!**\nPlease provide the **Card Holder Name** as shown on card (e.g., GULZAR AHMED):", parse_mode="Markdown")
 
-@dp.message_handler(lambda message: len(message.text.split()) >= 1 and message.text not in ["Visa", "MasterCard", "USDT (TRC20) / Telebirr", "💸 Add Funds (USDT / Telebirr)", "🛒 Create Virtual Card 💳", "📋 My Virtual Cards 💳", "📞 Support / Contact", "🚪 Exit", "🔙 Back to Menu"])
+@dp.message_handler(lambda message: message.from_user.id in user_temp_data and "holder_name" not in user_temp_data[message.from_user.id])
 async def handle_name_input(message: types.Message):
+    if message.text in ["Visa Gold", "MasterCard", "USDT (TRC20) / Telebirr", "💸 Add Funds (USDT / Telebirr)", "🛒 Create Virtual Card 💳", "📋 My Virtual Cards 💳", "📞 Support / Contact", "🚪 Exit", "🔙 Back to Menu"]:
+        return
+        
+    user_temp_data[message.from_user.id]["holder_name"] = message.text.upper()
     await message.answer("💳 **Please select the card brand:**", parse_mode="Markdown", reply_markup=brand_keyboard)
 
-@dp.message_handler(lambda message: message.text in ["Visa", "MasterCard"])
+@dp.message_handler(lambda message: message.text in ["Visa Gold", "MasterCard"])
 async def handle_card_brand_selection(message: types.Message):
     user_id = message.from_user.id
     balance = get_user_balance(user_id)
-    required_usd = 5.0  # $5 card default plan
+    
+    user_data = user_temp_data.get(user_id, {"amount": 5.0, "holder_name": message.from_user.full_name.upper()})
+    required_usd = user_data.get("amount", 5.0)
+    holder_name = user_data.get("holder_name", "VALUED CUSTOMER")
     
     if user_id != ADMIN_ID and balance < required_usd:
         warning_text = (
@@ -219,56 +237,60 @@ async def handle_card_brand_selection(message: types.Message):
             "Please fund your account first or contact support: @Apexforexsupport"
         )
         await message.answer(warning_text, parse_mode="Markdown", reply_markup=main_menu_keyboard)
+        return
+    
+    if user_id != ADMIN_ID:
+        update_user_balance(user_id, -required_usd)
+        card_status_text = f"💵 **Balance:** `${required_usd:.2f} USD`"
     else:
-        if user_id != ADMIN_ID:
-            update_user_balance(user_id, -required_usd)
-            card_status_text = f"💵 **Balance:** `${required_usd:.2f} USD`"
-        else:
-            card_status_text = f"👑 **Admin Free Card**"
+        card_status_text = f"👑 **Admin Free Card**"
+    
+    # Generate valid standard card number using Luhn algorithm matching Visa Gold style (starts with 4)
+    if "Visa" in message.text:
+        card_num = generate_luhn_card([4000, 4111, 4222, 4532])
+        brand_title = "Visa Gold"
+        chip_art = "🟨💳 (Contactless)"
+    else:
+        card_num = generate_luhn_card([5100, 5200, 5300, 5400])
+        brand_title = "MasterCard"
+        chip_art = "🟨💳 (Contactless)"
         
-        # Generate valid standard card number using Luhn algorithm
-        if message.text == "Visa":
-            card_num = generate_luhn_card([4000, 4111, 4222, 4532, 4929])
-            brand_emoji = "🔹 **VISA PLATINUM**"
-            card_theme = "🟦 ⬛ 🟦 ⬛ 🟦" # Blue & Dark Theme
-        else:
-            card_num = generate_luhn_card([5100, 5200, 5300, 5400, 5500])
-            brand_emoji = "🔸 **MASTERCARD WORLD**"
-            card_theme = "🟥 ⬛ 🟥 ⬛ 🟥" # Red & Dark Theme
-            
-        cvv_num = f"{random.randint(100, 999)}"
-        expiry_date = f"{random.randint(1, 12):02d}/{random.randint(27, 31)}"
-        
-        conn = sqlite3.connect('virtual_card_bot.db')
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO cards (user_id, card_number, expiry, cvv, brand, amount_usd) VALUES (?, ?, ?, ?, ?, ?)',
-                       (user_id, card_num, expiry_date, cvv_num, message.text, required_usd))
-        conn.commit()
-        conn.close()
-        
-        # Beautiful Card Art UI Formatting
-        card_design = (
-            f"🎉 **Virtual {message.text} Card Generated Successfully!** 🎉\n\n"
-            f"{card_theme}\n"
-            f"┌──────────────────────────────┐\n"
-            f"│  {brand_emoji}                │\n"
-            f"│                              │\n"
-            f"│  💳 `{card_num}`    │\n"
-            f"│                              │\n"
-            f"│  📅 EXP: `{expiry_date}`  🔒 CVV: `{cvv_num}`  │\n"
-            f"│  {card_status_text}          │\n"
-            f"└──────────────────────────────┘\n"
-            f"{card_theme}\n\n"
-            f"🌍 _Your card is ready for online verification & usage!_"
-        )
-        await message.answer(card_design, parse_mode="Markdown", reply_markup=main_menu_keyboard)
+    cvv_num = f"{random.randint(100, 999)}"
+    expiry_date = f"{random.randint(1, 12):02d}/{random.randint(27, 31)}"
+    
+    conn = sqlite3.connect('virtual_card_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO cards (user_id, card_number, expiry, cvv, brand, holder_name, amount_usd) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                   (user_id, card_num, expiry_date, cvv_num, brand_title, holder_name, required_usd))
+    conn.commit()
+    conn.close()
+    
+    # Clear temp data
+    if user_id in user_temp_data:
+        del user_temp_data[user_id]
+    
+    # Visa Gold Realistic Card UI Design (Dark Blue background representation with Gold styling)
+    card_art = (
+        f"🎉 **{brand_title} Virtual Card Generated!** 🎉\n\n"
+        f"🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦\n"
+        f"💳 **{brand_title.upper()}**          {chip_art}\n"
+        f"│                               │\n"
+        f"│  🌟 `{card_num}`    │\n"
+        f"│                               │\n"
+        f"│  GOOD 📅 `{expiry_date}`       CVV: `{cvv_num}` │\n"
+        f"│  👤 `{holder_name}`           │\n"
+        f"│  {card_status_text}                 │\n"
+        f"🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦\n\n"
+        f"🌍 _Ready for online payments & verification!_"
+    )
+    await message.answer(card_art, parse_mode="Markdown", reply_markup=main_menu_keyboard)
 
 @dp.message_handler(lambda message: message.text == "📋 My Virtual Cards 💳")
 async def show_user_cards(message: types.Message):
     user_id = message.from_user.id
     conn = sqlite3.connect('virtual_card_bot.db')
     cursor = conn.cursor()
-    cursor.execute('SELECT card_number, expiry, cvv, brand, amount_usd FROM cards WHERE user_id = ?', (user_id,))
+    cursor.execute('SELECT card_number, expiry, cvv, brand, holder_name, amount_usd FROM cards WHERE user_id = ?', (user_id,))
     cards = cursor.fetchall()
     conn.close()
     
@@ -277,17 +299,21 @@ async def show_user_cards(message: types.Message):
     else:
         response = "📋 **Your Active Virtual Cards:**\n\n"
         for idx, card in enumerate(cards, 1):
-            brand_icon = "🔹" if card[3] == "Visa" else "🔸"
             response += (
-                f"{brand_icon} *Card #{idx} ({card[3]})*\n"
-                f"💳 `Num: {card[0]}`\n"
-                f"📅 Exp: `{card[1]}` | 🔒 CVV: `{card[2]}` | Bal: `${card[4]}`\n"
-                f"----------------------------------------\n"
+                f"🌟 *{card[3]} Card #{idx}*\n"
+                f"👤 Name: `{card[4]}`\n"
+                f"💳 Num: `{card[0]}`\n"
+                f"📅 Exp: `{card[1]}` | 🔒 CVV: `{card[2]}` | Bal: `${card[5]}`\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
             )
         await message.answer(response, parse_mode="Markdown", reply_markup=main_menu_keyboard)
 
 @dp.message_handler(lambda message: message.text in ["🔙 Back to Menu", "🚪 Exit"])
 async def back_to_menu(message: types.Message):
+    # clear temp data on cancel
+    if message.from_user.id in user_temp_data:
+        del user_temp_data[message.from_user.id]
+        
     balance = get_user_balance(message.from_user.id)
     etb_val = balance * EXCHANGE_RATE
     menu_text = f"🏠 **Main Menu**\n\n💵 **Wallet Balance:** `${balance:.2f} USD` (`{etb_val:.2f} ETB`)"
