@@ -1,5 +1,7 @@
 import sqlite3
 import random
+import os
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
@@ -254,6 +256,22 @@ async def process_admin_decision(callback_query: types.CallbackQuery):
         await bot.send_message(user_id, "❌ **Your deposit verification failed or was rejected.**")
         await callback_query.message.edit_caption("❌ **Rejected!**")
 
+# --- WEB SERVER FOR RENDER FREE WEB SERVICE ---
+async def handle_web(request):
+    return web.Response(text="Bot is running!")
+
+async def web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_web)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
 if __name__ == '__main__':
-    print("Bot is running with 1 USDT = 220 ETB rate...")
+    import asyncio
+    loop = asyncio.get_event_loop()
+    loop.create_task(web_server())
+    print("Bot and Web Server are running...")
     executor.start_polling(dp, skip_updates=True)
